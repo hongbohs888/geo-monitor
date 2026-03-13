@@ -1,0 +1,15 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;700;800&display=swap');
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body, #__next { height: 100%; }
+body { background: #09090e; color: #ddd; font-family: 'Inter', -apple-system, sans-serif; }
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 3px; }
+input::placeholder { color: #3a3a3a; }
+button { cursor: pointer; transition: filter 0.15s; }
+button:hover { filter: brightness(1.08); }
+button:disabled { cursor: default; filter: none; }
+a:hover { filter: brightness(1.15); }
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; }
