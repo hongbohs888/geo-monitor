@@ -47,6 +47,9 @@ export default function GeoApp({ session }) {
   const[cQ,setCQ]=useState(null);const[aType,setAType]=useState("guide");const[article,setArticle]=useState("");const[isGenA,setIsGenA]=useState(false);const[copied,setCopied]=useState(false);
   // Company KB
   const[kb,setKb]=useState([]);const[kbTitle,setKbTitle]=useState("");const[kbContent,setKbContent]=useState("");const[kbCat,setKbCat]=useState("客户案例");const[kbFilter,setKbFilter]=useState("all");const[kbEdit,setKbEdit]=useState(null);
+  // AI优化
+  const[kbOriginal,setKbOriginal]=useState("");const[kbOptimizing,setKbOptimizing]=useState(false);const[kbSuggestions,setKbSuggestions]=useState([]);const[kbImages,setKbImages]=useState([]);
+  const kbFileRef=useRef(null);
   // WX - search
   const[wxTab,setWxTab]=useState("search");
   const[wxKw,setWxKw]=useState("");const[wxResults,setWxResults]=useState([]);const[wxLoading,setWxLoading]=useState(false);const[wxPage,setWxPage]=useState(1);const[wxTotal,setWxTotal]=useState(0);const[wxPeriod,setWxPeriod]=useState(30);
@@ -100,14 +103,21 @@ export default function GeoApp({ session }) {
   const saveBrand=useCallback(async()=>{if(!brandIn.trim())return;setBrand(brandIn.trim());await saveProject({brand:brandIn.trim()});},[brandIn,saveProject]);
   const saveComps=useCallback(async c=>{setComps(c);await saveProject({competitors:c});},[saveProject]);
   const saveContact=useCallback(async i=>{setContactInfo(i);await saveProject({contact_info:i});},[saveProject]);
+  const[wxCopied,setWxCopied]=useState(false);const[wxKbSaved,setWxKbSaved]=useState(false);
+  const cleanHtml=t=>(t||"").replace(/<[^>]+>/g,'').replace(/\\n/g,'\n').trim();
   const copyA=useCallback(async()=>{try{await navigator.clipboard.writeText(article)}catch(e){}setCopied(true);setTimeout(()=>setCopied(false),2500);},[article]);
-  const copyText=async t=>{try{await navigator.clipboard.writeText(t)}catch(e){}};
+  const copyText=async t=>{try{await navigator.clipboard.writeText(cleanHtml(t))}catch(e){}};
 
   // ======== KEYWORDS ========
+  // Keyword history
+  const[kwHistory,setKwHistory]=useState([]);
+  useEffect(()=>{if(!project)return;supabase.from('wx_search_history').select('*').eq('project_id',project.id).eq('search_type','keyword_gen').order('searched_at',{ascending:false}).limit(15).then(({data})=>{if(data)setKwHistory(data);});},[project]);
+
   const genKw=useCallback(async()=>{if(!kw.trim())return;setIsGen(true);setQs([]);setSel(new Set());
+    const kwVal=kw.trim();
     const prompt=`你是GEO高级策略顾问，精通LLM查询扇出机制。当用户在AI平台提问时，LLM会将问题分解为6-20个子查询并行检索，所以你生成的问题必须覆盖完整的子查询空间。
 
-输入关键词：${kw.trim()}${brand?`\n品牌：${brand}`:""}${comps.length?`\n竞对：${comps.join("、")}`:""}
+输入关键词：${kwVal}${brand?`\n品牌：${brand}`:""}${comps.length?`\n竞对：${comps.join("、")}`:""}
 
 生成6组问题，每组4个，按客户决策旅程排列。每个问题必须是15-25字的完整自然语言句子，像真人在手机上打字问AI的语气。至少一半要带地域信息。
 
@@ -119,11 +129,28 @@ export default function GeoApp({ session }) {
 【BOFU决策层-效果诊断】客户已经在做了但不满意。句式：做了没效果、播放量上不去、感觉被骗了。带具体的数据描述。
 
 质量要求：口语化像真人打字、每个问题切入不同需求角度、24个问题之间零意思重复、查询变体在句式结构和约束条件上有实质差异。禁止关键词堆砌。
-JSON返回：[{"stage":"TOFU认知层-痛点驱动","question":"..."}]`;
-    try{const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'user',content:prompt}],max_tokens:3000})});const d=await r.json();if(d.text)setQs(JSON.parse(d.text.replace(/```json|```/g,"").trim()));else throw 0;}catch(e){
-      const t={"TOFU认知层-痛点驱动":["在济南开了餐饮店抖音发了半年没客人","教培机构抖音管得严还有什么获客办法","同行都做短视频我不做是不是被淘汰","工厂想短视频找客户不知从哪下手"],"TOFU认知层-需求评估":["月营业额十几万有必要花钱做短视频吗","不会拍剪是不是只能找代运营","短视频运营能带来多少客户","预算每月三五千做短视频够吗"],"MOFU考虑层-选型对比":["济南短视频代运营怎么选预算五千","自己招人和找代运营哪个划算","代运营一个月多少钱济南行情","大公司和小工作室有什么区别"],"MOFU考虑层-避坑决策":["找短视频代运营最容易踩什么坑","承诺保证播放量能信吗","签合同要注意哪些条款","怎么判断一家公司靠不靠谱"],"BOFU决策层-品牌验证":[`${brand||"某公司"}做短视频效果怎么样`,"济南做餐饮短视频做得好的公司","想找本地代运营谁家口碑好","A公司和B公司哪个好"],"BOFU决策层-效果诊断":["找了代运营三个月花两万播放量几十个","涨了一万粉但没客户什么情况","做了半年没线索是谁的问题","感觉被忽悠了想换怕又踩坑"]};
+严格只返回JSON数组，不要任何解释文字：[{"stage":"TOFU认知层-痛点驱动","question":"..."}]`;
+    try{
+      const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'system',content:'你是JSON生成器，严格只输出JSON数组，不要任何解释文字。'},{role:'user',content:prompt}],max_tokens:3000})});
+      const d=await r.json();
+      if(d.text){
+        let txt=d.text.replace(/```json|```/g,"").trim();
+        // 提取JSON数组：找到第一个[和最后一个]之间的内容
+        const s=txt.indexOf('['),e=txt.lastIndexOf(']');
+        if(s!==-1&&e!==-1&&e>s)txt=txt.slice(s,e+1);
+        const parsed=JSON.parse(txt);
+        if(Array.isArray(parsed)&&parsed.length>0){setQs(parsed);
+          // 保存搜索历史
+          if(project){const{data:sh}=await supabase.from('wx_search_history').insert({project_id:project.id,keyword:kwVal,result_count:parsed.length,search_type:'keyword_gen'}).select().single();if(sh)setKwHistory(p=>[sh,...p.filter(h=>h.keyword!==kwVal)].slice(0,15));}
+        }else throw new Error('empty');
+      }else throw new Error('no text');
+    }catch(e){
+      console.error('关键词生成失败:',e);
+      // 动态fallback：基于用户输入的关键词生成
+      const k=kwVal;
+      const t={"TOFU认知层-痛点驱动":[`想做${k}但完全不知道从哪里开始`,`${k}做了几个月一点效果都没有`,`同行都在做${k}我还没开始怎么办`,`小公司预算少能做${k}吗`],"TOFU认知层-需求评估":[`现在开始做${k}还来得及吗`,`每月花几千块做${k}值不值`,`${k}到底能带来多少客户`,`我的行业适不适合做${k}`],"MOFU考虑层-选型对比":[`${k}找谁做比较靠谱`,`${k}一个月大概多少钱`,`做${k}是自己招人好还是外包好`,`${k}公司那么多怎么选`],"MOFU考虑层-避坑决策":[`找${k}公司最容易踩什么坑`,`${k}合同要注意哪些细节`,`承诺保证效果的${k}公司能信吗`,`怎么判断${k}公司靠不靠谱`],"BOFU决策层-品牌验证":[`${brand||"本地"}做${k}哪家口碑好`,`有没有人找过${k}公司效果好的`,`${k}行业排名前几的公司有哪些`,`${comps[0]||"A公司"}的${k}服务怎么样`],"BOFU决策层-效果诊断":[`找了${k}公司三个月没效果怎么办`,`${k}花了两万块但没有客户来`,`做了半年${k}感觉被忽悠了`,`${k}效果不好是换公司还是自己做`]};
       setQs(Object.entries(t).flatMap(([s,a])=>a.map(q=>({stage:s,question:q}))));
-    }setIsGen(false);},[kw,brand,comps]);
+    }setIsGen(false);},[kw,brand,comps,project]);
   const toggleQ=i=>setSel(p=>{const n=new Set(p);n.has(i)?n.delete(i):n.add(i);return n;});
   const addMon=useCallback(async()=>{const nq=[...sel].map(i=>({question:qs[i].question,category:qs[i].stage})).filter(q=>!mon.some(m=>m.question===q.question));if(!nq.length||!project)return;const{data}=await supabase.from('keywords').insert(nq.map(q=>({project_id:project.id,question:q.question,category:q.category}))).select();if(data)setMon(p=>[...p,...data.map(k=>({id:k.id,question:k.question,category:k.category}))]);setSel(new Set());setTab("monitor");},[sel,qs,mon,project]);
 
@@ -174,8 +201,38 @@ JSON返回：[{"stage":"TOFU认知层-痛点驱动","question":"..."}]`;
   const wxSaveToKb=useCallback(async item=>{if(!project)return;const content=item.content?item.content.replace(/<[^>]+>/g,'').slice(0,5000):item.title;const{data}=await supabase.from('knowledge_base').insert({project_id:project.id,title:item.title,content,category:"公众号素材",source:item.wx_name,source_url:item.url,metadata:{read:item.read,praise:item.praise}}).select().single();if(data)setKb(p=>[data,...p]);setWxSaved(p=>new Set([...p,item.url]));},[project]);
 
   // Company KB
-  const addKbItem=useCallback(async()=>{if(!kbTitle.trim()||!kbContent.trim()||!project)return;if(kbEdit){await supabase.from('knowledge_base').update({title:kbTitle,content:kbContent,category:kbCat}).eq('id',kbEdit);setKb(p=>p.map(k=>k.id===kbEdit?{...k,title:kbTitle,content:kbContent,category:kbCat}:k));setKbEdit(null);}else{const{data}=await supabase.from('knowledge_base').insert({project_id:project.id,title:kbTitle.trim(),content:kbContent.trim(),category:kbCat}).select().single();if(data)setKb(p=>[data,...p]);}setKbTitle("");setKbContent("");},[kbTitle,kbContent,kbCat,kbEdit,project]);
+  const addKbItem=useCallback(async()=>{if(!kbTitle.trim()||!kbContent.trim()||!project)return;const imgMeta=kbImages.length?{images:kbImages.map(i=>({name:i.name,url:i.url}))}:{};if(kbEdit){await supabase.from('knowledge_base').update({title:kbTitle,content:kbContent,category:kbCat,metadata:imgMeta}).eq('id',kbEdit);setKb(p=>p.map(k=>k.id===kbEdit?{...k,title:kbTitle,content:kbContent,category:kbCat,metadata:imgMeta}:k));setKbEdit(null);}else{const{data}=await supabase.from('knowledge_base').insert({project_id:project.id,title:kbTitle.trim(),content:kbContent.trim(),category:kbCat,metadata:imgMeta}).select().single();if(data)setKb(p=>[data,...p]);}setKbTitle("");setKbContent("");setKbImages([]);setKbSuggestions([]);setKbOriginal("");},[kbTitle,kbContent,kbCat,kbEdit,project,kbImages]);
   const delKbItem=async id=>{await supabase.from('knowledge_base').delete().eq('id',id);setKb(p=>p.filter(k=>k.id!==id));};
+
+  // AI优化知识库内容
+  const kbOptimize=useCallback(async()=>{if(!kbContent.trim())return;setKbOptimizing(true);setKbOriginal(kbContent);setKbSuggestions([]);
+    try{const r=await fetch('/api/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:[{role:'system',content:'你是企业文案优化专家。用户会给你一段公司资料，请生成5个不同风格的优化版本。严格只返回JSON数组。'},{role:'user',content:`优化以下公司资料，生成5个不同角度的优化版本：\n\n标题：${kbTitle||"无标题"}\n分类：${kbCat}\n内容：${kbContent.trim()}\n\n要求：\n1. 专业正式版：适合官网、百科，数据精确，措辞严谨\n2. 故事化版：用叙事手法包装，适合公众号\n3. 精简提炼版：压缩到核心要点，适合知乎、问答\n4. 数据强化版：突出量化指标，适合行业报告引用\n5. 口语化版：自然亲切，适合社交媒体\n\n严格JSON格式：[{"style":"专业正式版","content":"..."},{"style":"故事化版","content":"..."},{"style":"精简提炼版","content":"..."},{"style":"数据强化版","content":"..."},{"style":"口语化版","content":"..."}]`}],max_tokens:4000})});
+      const d=await r.json();
+      if(d.text){let txt=d.text.replace(/```json|```/g,"").trim();const s=txt.indexOf('['),e=txt.lastIndexOf(']');if(s!==-1&&e>s)txt=txt.slice(s,e+1);const parsed=JSON.parse(txt);if(Array.isArray(parsed))setKbSuggestions(parsed);}
+    }catch(e){console.error(e);}
+    setKbOptimizing(false);
+  },[kbContent,kbTitle,kbCat]);
+
+  const kbUndo=()=>{if(kbOriginal){setKbContent(kbOriginal);setKbSuggestions([]);setKbOriginal("");}};
+  const kbApplySuggestion=(content)=>{if(!kbOriginal)setKbOriginal(kbContent);setKbContent(content);setKbSuggestions([]);};
+
+  // 图片上传到Supabase Storage
+  const kbUploadImage=useCallback(async(e)=>{const files=e.target.files;if(!files||!files.length||!project)return;
+    for(const file of files){
+      if(file.size>4*1024*1024){alert('图片不能超过4MB');continue;}
+      const ext=file.name.split('.').pop();
+      const path=`kb/${project.id}/${Date.now()}-${Math.random().toString(36).slice(2,6)}.${ext}`;
+      const{data,error}=await supabase.storage.from('kb-images').upload(path,file);
+      if(error){
+        // 如果bucket不存在，用base64存储作为备选
+        const reader=new FileReader();reader.onload=ev=>{setKbImages(p=>[...p,{name:file.name,url:ev.target.result,size:file.size}]);};reader.readAsDataURL(file);
+      }else{
+        const{data:urlData}=supabase.storage.from('kb-images').getPublicUrl(path);
+        setKbImages(p=>[...p,{name:file.name,url:urlData.publicUrl,path,size:file.size}]);
+      }
+    }
+    e.target.value='';
+  },[project]);
 
   // Stats
   const stats=useMemo(()=>{if(!res.length)return null;const score=Math.round(res.reduce((s,r)=>s+ST[r.myBrandStatus||r.status].score,0)/res.length);const counts={"首推":0,"被提及":0,"被引用":0,"未出现":0};res.forEach(r=>counts[r.myBrandStatus||r.status]++);const mr=Math.round(((res.length-counts["未出现"])/res.length)*100);const bp={};PN.forEach(p=>{const pr=res.filter(r=>r.platform===p);bp[p]={score:pr.length?Math.round(pr.reduce((s,r)=>s+ST[r.myBrandStatus||r.status].score,0)/pr.length):0,counts:{"首推":0,"被提及":0,"被引用":0,"未出现":0}};pr.forEach(r=>bp[p].counts[r.myBrandStatus||r.status]++);});const mx={};mon.forEach(m=>{mx[m.question]={};PN.forEach(p=>mx[m.question][p]="未出现");});res.forEach(r=>{if(mx[r.question])mx[r.question][r.platform]=r.myBrandStatus||r.status;});return{score,counts,mr,bp,mx};},[res,mon]);
@@ -222,7 +279,8 @@ JSON返回：[{"stage":"TOFU认知层-痛点驱动","question":"..."}]`;
     {/* KEYWORDS */}
     {tab==="keywords"&&<div>
       <h1 style={{fontSize:26,fontWeight:700,color:"#1A202C",margin:"0 0 20px"}}>关键词扩展</h1>
-      <div style={{display:"flex",gap:10,marginBottom:24}}><Inp value={kw} onChange={e=>setKw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&genKw()} placeholder="输入关键词" style={{flex:1,marginBottom:0}}/><Btn primary onClick={genKw} disabled={isGen||!kw.trim()}>{isGen?<><Loader2 size={15} className="spin"/>生成中</>:<><Zap size={15}/>生成</>}</Btn></div>
+      <div style={{display:"flex",gap:10,marginBottom:12}}><Inp value={kw} onChange={e=>setKw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&genKw()} placeholder="输入关键词" style={{flex:1,marginBottom:0}}/><Btn primary onClick={genKw} disabled={isGen||!kw.trim()}>{isGen?<><Loader2 size={15} className="spin"/>生成中</>:<><Zap size={15}/>生成</>}</Btn></div>
+      {kwHistory.length>0&&<div style={{marginBottom:20}}><div style={{fontSize:12,color:"#A0AEC0",marginBottom:5}}>🕐 历史搜索</div><div style={{display:"flex",gap:4,flexWrap:"wrap"}}>{kwHistory.map(h=><button key={h.id} onClick={()=>{setKw(h.keyword);}} style={{padding:"4px 12px",borderRadius:14,fontSize:12,border:"1px solid #E2E8F0",background:kw===h.keyword?"#EBF4FF":"#fff",color:kw===h.keyword?"#007AFF":"#718096",cursor:"pointer"}}>{h.keyword}</button>)}</div></div>}
       {qs.length>0&&<><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}><span style={{fontSize:14,color:"#718096"}}>共{qs.length}个 · 已选{sel.size}个</span><div style={{display:"flex",gap:6}}><Btn onClick={()=>setSel(p=>p.size===qs.length?new Set():new Set(qs.map((_,i)=>i)))}>{sel.size===qs.length?"取消":"全选"}</Btn><Btn primary onClick={addMon} disabled={!sel.size}><Plus size={14}/>加入监控</Btn></div></div>
       {STAGES.map(stg=>{const sq=qs.map((q,i)=>({...q,idx:i})).filter(q=>q.stage===stg.key);if(!sq.length)return null;return<div key={stg.key} style={{marginBottom:18}}><div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}><span style={{fontSize:16}}>{stg.emoji}</span><span style={{fontSize:15,fontWeight:600,color:stg.color}}>{stg.key}</span><span style={{fontSize:12,color:"#A0AEC0"}}>{stg.desc}</span></div>{sq.map(q=><div key={q.idx} onClick={()=>toggleQ(q.idx)} style={{display:"flex",alignItems:"center",gap:10,padding:"11px 14px",background:sel.has(q.idx)?"#EBF4FF":"#fff",border:sel.has(q.idx)?"1px solid #90CDF4":"1px solid #E2E8F0",borderRadius:10,marginBottom:4,cursor:"pointer"}}><div style={{width:18,height:18,borderRadius:5,display:"flex",alignItems:"center",justifyContent:"center",background:sel.has(q.idx)?"#007AFF":"#fff",border:sel.has(q.idx)?"none":"1.5px solid #CBD5E0",flexShrink:0}}>{sel.has(q.idx)&&<Check size={12} color="#fff"/>}</div><span style={{fontSize:14,color:"#4A5568"}}>{q.question}</span></div>)}</div>})}</>}
       {!qs.length&&!isGen&&<div style={{textAlign:"center",padding:"50px 0"}}><Search size={36} color="#CBD5E0" style={{marginBottom:10}}/><div style={{fontSize:16,color:"#A0AEC0"}}>输入关键词生成问题</div></div>}
@@ -249,7 +307,9 @@ JSON返回：[{"stage":"TOFU认知层-痛点驱动","question":"..."}]`;
           <Btn small danger onClick={async e=>{e.stopPropagation();if(m.id)await supabase.from('keywords').delete().eq('id',m.id);setMon(p=>p.filter((_,i)=>i!==qi));setRes(p=>p.filter(r=>r.question!==m.question));setMonSel(p=>{const n=new Set();p.forEach(v=>{if(v<qi)n.add(v);else if(v>qi)n.add(v-1);});return n;});}}><Trash2 size={11}/></Btn>
           {isE?<ChevronUp size={15} color="#A0AEC0" onClick={()=>setExpQ(null)} style={{cursor:"pointer"}}/>:<ChevronDown size={15} color="#A0AEC0" onClick={()=>setExpQ(qi)} style={{cursor:"pointer"}}/>}
         </div>
-        {isE&&qr.length>0&&<div style={{padding:"0 16px 12px",borderTop:"1px solid #EDF2F7"}}>{PN.map(p=>{const r=qr.find(r=>r.platform===p);if(!r)return null;const isD=expR===(r.question+p);return<div key={p} style={{marginTop:6,background:"#F7FAFC",borderRadius:8,overflow:"hidden"}}><div onClick={()=>setExpR(isD?null:r.question+p)} style={{display:"flex",alignItems:"center",gap:6,padding:"10px 12px",cursor:"pointer"}}><span style={{fontSize:13,fontWeight:600,color:PF[p].color}}>{PF[p].icon} {p}</span><Badge status={r.myBrandStatus||r.status}/><span style={{marginLeft:"auto"}}/><Btn small onClick={e=>{e.stopPropagation();recreate(r.rawResponse,r.question,`${r.platform}采集二创`);}} disabled={isRecreating===r.question} style={{background:"#FFFAF0",color:"#DD6B20"}}>{isRecreating===r.question?<Loader2 size={11} className="spin"/>:<><RotateCw size={11}/>二创</>}</Btn></div>{isD&&<div style={{padding:"0 12px 10px",borderTop:"1px solid #EDF2F7"}}><div style={{fontSize:12,color:"#718096",lineHeight:1.7,whiteSpace:"pre-wrap",background:"#fff",borderRadius:6,padding:"10px",marginTop:4,maxHeight:220,overflowY:"auto"}}>{r.rawResponse}</div></div>}</div>;})}</div>}
+        {isE&&qr.length>0&&<div style={{padding:"0 16px 12px",borderTop:"1px solid #EDF2F7"}}>{PN.map(p=>{const r=qr.find(r=>r.platform===p);if(!r)return null;const isD=expR===(r.question+p);const excerpt=(r.rawResponse||"").replace(/\[模拟\][^\n]*/,"").trim().slice(0,150);return<div key={p} style={{marginTop:6,background:"#F7FAFC",borderRadius:8,overflow:"hidden"}}><div onClick={()=>setExpR(isD?null:r.question+p)} style={{display:"flex",alignItems:"center",gap:6,padding:"10px 12px",cursor:"pointer"}}><span style={{fontSize:13,fontWeight:600,color:PF[p].color}}>{PF[p].icon} {p}</span><Badge status={r.myBrandStatus||r.status}/>{r.isReal&&<span style={{fontSize:10,padding:"2px 6px",borderRadius:4,background:"#F0FFF4",color:"#38A169"}}>真实</span>}<span style={{marginLeft:"auto"}}/><Btn small onClick={e=>{e.stopPropagation();recreate(r.rawResponse,r.question,`${r.platform}采集二创`);}} disabled={isRecreating===r.question} style={{background:"#FFFAF0",color:"#DD6B20"}}>{isRecreating===r.question?<Loader2 size={11} className="spin"/>:<><RotateCw size={11}/>二创</>}</Btn></div>
+              {excerpt&&<div style={{padding:"0 12px 8px",fontSize:12,color:"#718096",lineHeight:1.5}}>{excerpt}{(r.rawResponse||"").length>150?"...":""}</div>}
+              {isD&&<div style={{padding:"0 12px 10px",borderTop:"1px solid #EDF2F7"}}><div style={{fontSize:12,color:"#718096",lineHeight:1.7,whiteSpace:"pre-wrap",background:"#fff",borderRadius:6,padding:"10px",marginTop:4,maxHeight:300,overflowY:"auto"}}>{r.rawResponse}</div>{r.isReal&&<Btn small onClick={()=>copyText(r.rawResponse)} style={{marginTop:6}}><Copy size={11}/>复制回答</Btn>}</div>}</div>;})}</div>}
       </div>;})}
     </div>}
 
@@ -263,14 +323,14 @@ JSON返回：[{"stage":"TOFU认知层-痛点驱动","question":"..."}]`;
             <h2 style={{fontSize:20,fontWeight:700,color:"#1A202C",margin:"0 0 10px",lineHeight:1.4}}>{wxDetail.title}</h2>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}><div style={{width:28,height:28,borderRadius:8,background:"#EBF4FF",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:"#007AFF",fontWeight:600}}>{(wxDetail.wx_name||"?")[0]}</div><div><div style={{fontSize:13,fontWeight:600,color:"#2D3748"}}>{wxDetail.wx_name}</div><div style={{fontSize:12,color:"#A0AEC0"}}>{wxDetail.publish_time_str} · 阅读{wxDetail.read>=10000?(wxDetail.read/10000).toFixed(1)+'w':wxDetail.read} · 点赞{wxDetail.praise}{wxDetail.is_original===1?" · 原创":""}</div></div></div>
             <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-              <Btn small onClick={()=>copyText(wxDetail.content||wxDetail.title)}><Copy size={12}/>复制全文</Btn>
-              <Btn small onClick={()=>wxSaveToKb(wxDetail)} style={{background:"#F0FFF4",color:"#38A169"}}><Plus size={12}/>收录知识库</Btn>
-              <Btn small onClick={()=>recreate(wxDetail.content||wxDetail.title,wxDetail.title,"公众号二创")} disabled={isRecreating===wxDetail.title} style={{background:"#FFFAF0",color:"#DD6B20"}}>{isRecreating===wxDetail.title?<Loader2 size={11} className="spin"/>:<><RotateCw size={12}/>AI二创</>}</Btn>
+              <Btn small onClick={async()=>{await copyText(wxDetail.content||wxDetail.title);setWxCopied(true);setTimeout(()=>setWxCopied(false),2000);}} style={wxCopied?{background:"#F0FFF4",color:"#38A169"}:{}}>{wxCopied?<><Check size={12}/>已复制</>:<><Copy size={12}/>复制全文</>}</Btn>
+              <Btn small onClick={async()=>{await wxSaveToKb(wxDetail);setWxKbSaved(true);setTimeout(()=>setWxKbSaved(false),2000);}} disabled={wxKbSaved} style={{background:wxKbSaved?"#F0FFF4":"#F0FFF4",color:"#38A169"}}>{wxKbSaved?<><Check size={12}/>已收录</>:<><Plus size={12}/>收录知识库</>}</Btn>
+              <Btn small onClick={()=>recreate(cleanHtml(wxDetail.content)||wxDetail.title,wxDetail.title,"公众号二创")} disabled={isRecreating===wxDetail.title} style={{background:"#FFFAF0",color:"#DD6B20"}}>{isRecreating===wxDetail.title?<Loader2 size={11} className="spin"/>:<><RotateCw size={12}/>AI二创</>}</Btn>
               {wxDetail.url&&<a href={wxDetail.url} target="_blank" rel="noopener noreferrer" style={{display:"inline-flex",alignItems:"center",gap:4,padding:"7px 14px",borderRadius:10,fontSize:13,fontWeight:600,background:"#EDF2F7",color:"#718096",textDecoration:"none"}}>原文<ExternalLink size={11}/></a>}
             </div>
           </div>
           <div style={{padding:"20px 24px",maxHeight:500,overflowY:"auto"}}>
-            {wxDetail.content?<div style={{fontSize:15,color:"#4A5568",lineHeight:1.9,whiteSpace:"pre-wrap"}}>{wxDetail.content.replace(/<[^>]+>/g,'')}</div>:<div style={{textAlign:"center",padding:"30px 0",color:"#A0AEC0"}}><div style={{fontSize:14}}>该文章仅有摘要，点击上方"原文"查看完整内容</div></div>}
+            {wxDetail.content?<div style={{fontSize:15,color:"#4A5568",lineHeight:1.9,whiteSpace:"pre-wrap"}}>{cleanHtml(wxDetail.content)}</div>:<div style={{textAlign:"center",padding:"30px 0",color:"#A0AEC0"}}><div style={{fontSize:14}}>该文章仅有摘要，点击上方"原文"查看完整内容</div></div>}
           </div>
         </Card>
       </div>:<div>
@@ -308,15 +368,62 @@ JSON返回：[{"stage":"TOFU认知层-痛点驱动","question":"..."}]`;
     {tab==="companyKb"&&<div>
       <h1 style={{fontSize:26,fontWeight:700,color:"#1A202C",margin:"0 0 16px"}}>公司知识库</h1>
       <p style={{fontSize:14,color:"#718096",margin:"0 0 20px"}}>管理公司资料，生成文章时AI自动引用</p>
-      <Card><Lbl>{kbEdit?"编辑素材":"添加素材"}</Lbl><Inp value={kbTitle} onChange={e=>setKbTitle(e.target.value)} placeholder="标题，如：某餐饮客户3个月涨粉2万案例"/>
+      <Card>
+        <Lbl>{kbEdit?"编辑素材":"添加素材"}</Lbl>
+        <Inp value={kbTitle} onChange={e=>setKbTitle(e.target.value)} placeholder="标题，如：某餐饮客户3个月涨粉2万案例"/>
         <div style={{display:"flex",gap:5,marginBottom:12,flexWrap:"wrap"}}>{KB_CATS.map(c=><button key={c} onClick={()=>setKbCat(c)} style={{padding:"6px 12px",borderRadius:14,fontSize:12,border:"none",cursor:"pointer",background:kbCat===c?"#007AFF":"#EDF2F7",color:kbCat===c?"#fff":"#718096"}}>{c}</button>)}</div>
-        <TArea value={kbContent} onChange={e=>setKbContent(e.target.value)} placeholder="粘贴公司介绍、案例复盘、服务说明、行业数据等..." rows={4}/>
-        <div style={{display:"flex",gap:6,marginTop:10}}>{kbEdit&&<Btn onClick={()=>{setKbEdit(null);setKbTitle("");setKbContent("");}}>取消</Btn>}<Btn primary onClick={addKbItem} disabled={!kbTitle.trim()||!kbContent.trim()}><Plus size={14}/>{kbEdit?"保存":"添加"}</Btn></div>
+        <TArea value={kbContent} onChange={e=>setKbContent(e.target.value)} placeholder="粘贴公司介绍、案例复盘、服务说明、行业数据等..." rows={5}/>
+        {/* 图片上传区 */}
+        <div style={{marginTop:10}}>
+          <input ref={kbFileRef} type="file" accept="image/*,.pdf" multiple onChange={kbUploadImage} style={{display:"none"}}/>
+          <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap"}}>
+            <Btn small onClick={()=>kbFileRef.current?.click()} style={{background:"#EBF4FF",color:"#007AFF"}}><Image size={12}/>上传图片/PDF</Btn>
+            {kbImages.map((img,i)=><div key={i} style={{display:"flex",alignItems:"center",gap:4,padding:"4px 10px",background:"#F7FAFC",borderRadius:8,fontSize:11,color:"#4A5568"}}>
+              {img.url?.startsWith("data:image")?<img src={img.url} style={{width:24,height:24,borderRadius:4,objectFit:"cover"}}/>:<span>📄</span>}
+              <span style={{maxWidth:80,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{img.name}</span>
+              <button onClick={()=>setKbImages(p=>p.filter((_,j)=>j!==i))} style={{background:"none",border:"none",color:"#A0AEC0",cursor:"pointer",padding:0}}><X size={10}/></button>
+            </div>)}
+          </div>
+        </div>
+        {/* 操作按钮 */}
+        <div style={{display:"flex",gap:6,marginTop:12,flexWrap:"wrap"}}>
+          {kbEdit&&<Btn onClick={()=>{setKbEdit(null);setKbTitle("");setKbContent("");setKbImages([]);setKbSuggestions([]);setKbOriginal("");}}>取消</Btn>}
+          {kbOriginal&&<Btn onClick={kbUndo} style={{background:"#FED7D7",color:"#E53E3E"}}><RotateCw size={12}/>撤销（恢复原文）</Btn>}
+          <Btn onClick={kbOptimize} disabled={kbOptimizing||!kbContent.trim()} style={{background:"#EEEDFE",color:"#534AB7"}}>{kbOptimizing?<><Loader2 size={12} className="spin"/>优化中</>:<><Sparkles size={12}/>AI优化</>}</Btn>
+          <Btn primary onClick={addKbItem} disabled={!kbTitle.trim()||!kbContent.trim()}><Plus size={14}/>{kbEdit?"保存":"添加到知识库"}</Btn>
+        </div>
       </Card>
+      {/* AI优化建议 */}
+      {kbSuggestions.length>0&&<Card style={{border:"1px solid #CECBF6"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:14}}><Sparkles size={16} color="#534AB7"/><Lbl>AI优化方案（点击采用）</Lbl></div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {kbSuggestions.map((s,i)=><div key={i} onClick={()=>kbApplySuggestion(s.content)} style={{padding:"14px 16px",background:"#F7FAFC",borderRadius:10,cursor:"pointer",border:"1px solid #E2E8F0",transition:"all 0.15s"}} onMouseOver={e=>e.currentTarget.style.borderColor="#90CDF4"} onMouseOut={e=>e.currentTarget.style.borderColor="#E2E8F0"}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+              <span style={{fontSize:12,padding:"2px 8px",borderRadius:6,background:["#EBF4FF","#FAEEDA","#E1F5EE","#EEEDFE","#FCEBEB"][i],color:["#185FA5","#854F0B","#0F6E56","#534AB7","#A32D2D"][i],fontWeight:600}}>{s.style}</span>
+              <span style={{fontSize:11,color:"#A0AEC0",marginLeft:"auto"}}>点击采用</span>
+            </div>
+            <div style={{fontSize:13,color:"#4A5568",lineHeight:1.6,maxHeight:80,overflow:"hidden"}}>{s.content}</div>
+          </div>)}
+        </div>
+        <div style={{display:"flex",gap:6,marginTop:10}}>
+          <Btn small onClick={()=>setKbSuggestions([])}>关闭建议</Btn>
+          <Btn small onClick={kbUndo} style={{background:"#FED7D7",color:"#E53E3E"}}><RotateCw size={11}/>恢复原文</Btn>
+        </div>
+      </Card>}
+      {/* 素材列表 */}
       {kb.filter(k=>k.category!=="公众号素材").length>0&&<>
         <div style={{fontSize:16,fontWeight:600,marginBottom:10}}>📚 已收录 ({kb.filter(k=>k.category!=="公众号素材").length})</div>
         <div style={{display:"flex",gap:4,marginBottom:12,flexWrap:"wrap"}}><button onClick={()=>setKbFilter("all")} style={{padding:"5px 10px",borderRadius:12,fontSize:12,border:"none",cursor:"pointer",background:kbFilter==="all"?"#007AFF":"#EDF2F7",color:kbFilter==="all"?"#fff":"#718096"}}>全部</button>{KB_CATS.map(c=>{const cnt=kb.filter(k=>k.category===c).length;return cnt>0?<button key={c} onClick={()=>setKbFilter(c)} style={{padding:"5px 10px",borderRadius:12,fontSize:12,border:"none",cursor:"pointer",background:kbFilter===c?"#007AFF":"#EDF2F7",color:kbFilter===c?"#fff":"#718096"}}>{c}({cnt})</button>:null;})}</div>
-        {filteredKb.map(k=><div key={k.id} style={{background:"#fff",borderRadius:10,padding:"14px 16px",marginBottom:5,border:"1px solid #E2E8F0"}}><div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}><span style={{fontSize:11,padding:"2px 7px",borderRadius:5,background:"#EBF4FF",color:"#3182CE",fontWeight:600}}>{k.category}</span><span style={{fontSize:14,fontWeight:600,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#2D3748"}}>{k.title}</span><Btn small onClick={()=>{setKbTitle(k.title);setKbContent(k.content);setKbCat(k.category);setKbEdit(k.id);}}><PenTool size={10}/></Btn><Btn small danger onClick={()=>delKbItem(k.id)}><Trash2 size={10}/></Btn></div><div style={{fontSize:12,color:"#718096",lineHeight:1.5,maxHeight:44,overflow:"hidden"}}>{k.content}</div></div>)}
+        {filteredKb.map(k=><div key={k.id} style={{background:"#fff",borderRadius:10,padding:"14px 16px",marginBottom:5,border:"1px solid #E2E8F0"}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:5}}>
+            <span style={{fontSize:11,padding:"2px 7px",borderRadius:5,background:"#EBF4FF",color:"#3182CE",fontWeight:600}}>{k.category}</span>
+            <span style={{fontSize:14,fontWeight:600,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",color:"#2D3748"}}>{k.title}</span>
+            <Btn small onClick={()=>{setKbTitle(k.title);setKbContent(k.content);setKbCat(k.category);setKbEdit(k.id);setKbImages(k.metadata?.images||[]);setKbOriginal("");setKbSuggestions([]);}}><PenTool size={10}/></Btn>
+            <Btn small danger onClick={()=>delKbItem(k.id)}><Trash2 size={10}/></Btn>
+          </div>
+          <div style={{fontSize:12,color:"#718096",lineHeight:1.5,maxHeight:44,overflow:"hidden"}}>{k.content}</div>
+          {k.metadata?.images?.length>0&&<div style={{display:"flex",gap:4,marginTop:6}}>{k.metadata.images.map((img,i)=><img key={i} src={img.url} style={{width:36,height:36,borderRadius:6,objectFit:"cover",border:"1px solid #E2E8F0"}}/>)}</div>}
+        </div>)}
       </>}
       {kb.filter(k=>k.category!=="公众号素材").length===0&&<div style={{textAlign:"center",padding:"30px 0",color:"#A0AEC0"}}><Building2 size={32} style={{marginBottom:8,opacity:0.3}}/><div>添加公司资料后，AI生成文章更精准</div></div>}
     </div>}
