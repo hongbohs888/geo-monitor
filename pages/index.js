@@ -90,6 +90,9 @@ export default function Home(){
   const[kbTitle,setKbTitle]=useState("");const[kbContent,setKbContent]=useState("");const[kbCat,setKbCat]=useState("客户案例");const[kbFilter,setKbFilter]=useState("all");const[kbEdit,setKbEdit]=useState(null);
   // 公众号搜索 state
   const[wxKw,setWxKw]=useState("");const[wxResults,setWxResults]=useState([]);const[wxLoading,setWxLoading]=useState(false);const[wxPage,setWxPage]=useState(1);const[wxTotal,setWxTotal]=useState(0);const[wxExpand,setWxExpand]=useState(null);const[wxPeriod,setWxPeriod]=useState(30);const[wxSaved,setWxSaved]=useState(new Set());
+  // 公众号订阅 state
+  const[wxName,setWxName]=useState("");const[wxHist,setWxHist]=useState([]);const[wxHLoading,setWxHLoading]=useState(false);const[wxHPage,setWxHPage]=useState(1);const[wxHTotalPage,setWxHTotalPage]=useState(0);const[wxHExpand,setWxHExpand]=useState(null);const[wxMpInfo,setWxMpInfo]=useState(null);
+  const[kbMode,setKbMode]=useState("search"); // search | follow | manual
   // 二创 state
   const[isRecreating,setIsRecreating]=useState(null);
 
@@ -229,6 +232,28 @@ Markdown格式，直接输出正文。`;
     setWxSaved(p=>new Set([...p,item.url]));
   };
 
+  // 公众号历史发文
+  const wxHistSearch=useCallback(async(page=1)=>{
+    if(!wxName.trim())return;setWxHLoading(true);if(page===1){setWxHist([]);setWxMpInfo(null);}
+    try{
+      const r=await fetch('/api/wxhistory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:wxName.trim(),page})});
+      const d=await r.json();
+      if(d.code===200&&d.data){
+        if(page===1)setWxHist(d.data);else setWxHist(p=>[...p,...d.data]);
+        setWxHTotalPage(d.total_page||0);setWxHPage(page);
+        if(d.mp_nickname)setWxMpInfo({name:d.mp_nickname,avatar:d.head_img,wxid:d.mp_wxid,ghid:d.mp_ghid,total:d.total_num,masssend:d.masssend_count,publish:d.publish_count});
+      }
+    }catch(e){console.error(e);}
+    setWxHLoading(false);
+  },[wxName]);
+
+  const wxHistSaveToKb=(item)=>{
+    const content=item.digest||item.title;
+    const mpName=wxMpInfo?.name||wxName;
+    setKnowledgeBase(p=>[{id:`kb-wxh-${Date.now()}-${Math.random().toString(36).slice(2,6)}`,title:item.title,content,category:"公众号素材",createdAt:new Date().toISOString(),source:mpName,sourceUrl:item.url,position:item.position},...p]);
+    setWxSaved(p=>new Set([...p,item.url]));
+  };
+
   // STATS
   const stats=useMemo(()=>{if(!res.length)return null;const score=Math.round(res.reduce((s,r)=>s+ST[r.myBrandStatus].score,0)/res.length);const counts={"首推":0,"被提及":0,"被引用":0,"未出现":0};res.forEach(r=>counts[r.myBrandStatus]++);const mr=Math.round(((res.length-counts["未出现"])/res.length)*100);const bp={};PN.forEach(p=>{const pr=res.filter(r=>r.platform===p);bp[p]={score:pr.length?Math.round(pr.reduce((s,r)=>s+ST[r.myBrandStatus].score,0)/pr.length):0,counts:{"首推":0,"被提及":0,"被引用":0,"未出现":0}};pr.forEach(r=>bp[p].counts[r.myBrandStatus]++);});const cf={};res.forEach(r=>r.competitors?.forEach(c=>{cf[c.name]=(cf[c.name]||0)+1;}));const cr=Object.entries(cf).sort((a,b)=>b[1]-a[1]).map(([n,c])=>({name:n,count:c}));const mx={};mon.forEach(m=>{mx[m.question]={category:m.category};PN.forEach(p=>mx[m.question][p]="未出现");});res.forEach(r=>{if(mx[r.question])mx[r.question][r.platform]=r.myBrandStatus;});return{score,counts,mr,bp,cr,mx};},[res,mon]);
   const pie=stats?Object.entries(stats.counts).filter(([_,v])=>v>0).map(([n,v])=>({name:n,value:v})):[];
@@ -316,112 +341,54 @@ Markdown格式，直接输出正文。`;
         </div>;})}
       </div>}
 
-      {/* KNOWLEDGE BASE + 公众号搜索 */}
+      {/* KNOWLEDGE BASE */}
       {tab==="kb"&&<div>
         <h1 style={{fontSize:32,fontWeight:700,margin:"0 0 6px"}}>知识库</h1>
-        <p style={{fontSize:16,color:"rgba(255,255,255,0.4)",margin:"0 0 28px"}}>录入公司资料 & 采集公众号文章，生成内容时AI自动引用</p>
+        <p style={{fontSize:16,color:"rgba(255,255,255,0.4)",margin:"0 0 20px"}}>采集公众号文章 & 录入公司资料，生成内容时AI自动引用</p>
 
-        {/* 公众号文章搜索 */}
-        <Card style={{border:"1px solid rgba(255,149,0,0.15)"}}>
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18}}>
-            <span style={{fontSize:24}}>💚</span>
-            <div><div style={{fontSize:18,fontWeight:700}}>公众号文章采集</div><div style={{fontSize:14,color:"rgba(255,255,255,0.35)",marginTop:2}}>搜索关键词，一键收录行业好文到知识库</div></div>
-          </div>
+        {/* 模式切换 */}
+        <div style={{display:"flex",gap:6,marginBottom:24}}>
+          {[{k:"search",l:"🔍 关键词搜索"},{k:"follow",l:"📡 公众号订阅"},{k:"manual",l:"✏️ 手动录入"}].map(m=>
+            <button key={m.k} onClick={()=>setKbMode(m.k)} style={{padding:"12px 20px",borderRadius:14,border:kbMode===m.k?"1px solid rgba(0,122,255,0.3)":"1px solid rgba(255,255,255,0.06)",background:kbMode===m.k?"rgba(0,122,255,0.08)":"rgba(255,255,255,0.03)",color:kbMode===m.k?"#007AFF":"rgba(255,255,255,0.5)",cursor:"pointer",fontSize:15,fontWeight:600,flex:1,textAlign:"center"}}>{m.l}</button>
+          )}
+        </div>
+
+        {/* 关键词搜索 */}
+        {kbMode==="search"&&<Card style={{border:"1px solid rgba(255,149,0,0.15)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18}}><span style={{fontSize:24}}>💚</span><div><div style={{fontSize:18,fontWeight:700}}>公众号文章采集</div><div style={{fontSize:14,color:"rgba(255,255,255,0.35)",marginTop:2}}>按关键词搜索，收录行业好文</div></div></div>
           <div style={{display:"flex",gap:10,marginBottom:14}}>
             <Input value={wxKw} onChange={e=>setWxKw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&wxSearch(1)} placeholder="搜索关键词，如：短视频运营、餐饮获客..." style={{flex:1,marginBottom:0}}/>
-            <select value={wxPeriod} onChange={e=>setWxPeriod(Number(e.target.value))} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:14,padding:"0 16px",color:"#fff",fontSize:15,outline:"none",cursor:"pointer"}}>
-              <option value={7} style={{background:"#1c1c1e"}}>近7天</option>
-              <option value={30} style={{background:"#1c1c1e"}}>近30天</option>
-              <option value={90} style={{background:"#1c1c1e"}}>近90天</option>
-              <option value={365} style={{background:"#1c1c1e"}}>近1年</option>
-            </select>
-            <Btn primary onClick={()=>wxSearch(1)} disabled={wxLoading||!wxKw.trim()} style={{flexShrink:0}}>
-              {wxLoading?<><Loader2 size={15} className="spin"/>搜索中</>:<><Search size={15}/>搜索</>}
-            </Btn>
+            <select value={wxPeriod} onChange={e=>setWxPeriod(Number(e.target.value))} style={{background:"rgba(255,255,255,0.06)",border:"1px solid rgba(255,255,255,0.1)",borderRadius:14,padding:"0 16px",color:"#fff",fontSize:15,outline:"none",cursor:"pointer"}}><option value={7} style={{background:"#1c1c1e"}}>近7天</option><option value={30} style={{background:"#1c1c1e"}}>近30天</option><option value={90} style={{background:"#1c1c1e"}}>近90天</option><option value={365} style={{background:"#1c1c1e"}}>近1年</option></select>
+            <Btn primary onClick={()=>wxSearch(1)} disabled={wxLoading||!wxKw.trim()} style={{flexShrink:0}}>{wxLoading?<><Loader2 size={15} className="spin"/>搜索中</>:<><Search size={15}/>搜索</>}</Btn>
           </div>
+          {wxResults.length>0&&<><div style={{fontSize:14,color:"rgba(255,255,255,0.35)",marginBottom:12}}>找到 {wxTotal} 篇，已加载 {wxResults.length} 篇</div><div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:500,overflowY:"auto"}}>{wxResults.map((item,idx)=>{const isSaved=wxSaved.has(item.url)||knowledgeBase.some(k=>k.title===item.title);const isExp=wxExpand===idx;return<div key={idx} style={{background:"rgba(255,255,255,0.03)",borderRadius:14,border:"1px solid rgba(255,255,255,0.05)",overflow:"hidden"}}><div style={{padding:"16px 20px",display:"flex",gap:14,alignItems:"flex-start"}}>{item.avatar&&<img src={item.avatar} style={{width:80,height:52,borderRadius:8,objectFit:"cover",flexShrink:0}} onError={e=>{e.target.style.display='none';}}/>}<div style={{flex:1,minWidth:0}}><div style={{fontSize:16,fontWeight:600,lineHeight:1.4,marginBottom:6,overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{item.title}</div><div style={{display:"flex",flexWrap:"wrap",gap:10,fontSize:13,color:"rgba(255,255,255,0.35)"}}><span style={{color:"rgba(255,255,255,0.5)",fontWeight:500}}>{item.wx_name}</span><span>👁 {item.read>=10000?(item.read/10000).toFixed(1)+'w':item.read}</span><span>👍 {item.praise}</span><span>{item.publish_time_str}</span>{item.is_original===1&&<span style={{color:"#34C759",fontWeight:600}}>原创</span>}</div></div><div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}><Btn small primary onClick={()=>wxSaveToKb(item)} disabled={isSaved}>{isSaved?<><Check size={12}/>已收录</>:<><Plus size={12}/>收录</>}</Btn><Btn small onClick={()=>setWxExpand(isExp?null:idx)}>{isExp?<><ChevronUp size={12}/>收起</>:<><Eye size={12}/>预览</>}</Btn>{item.url&&<a href={item.url} target="_blank" rel="noopener noreferrer" style={{display:"flex",alignItems:"center",justifyContent:"center",gap:4,padding:"7px 14px",borderRadius:8,fontSize:12,fontWeight:600,background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",textDecoration:"none"}}>原文<ExternalLink size={11}/></a>}</div></div>{isExp&&item.content&&<div style={{padding:"0 20px 16px",borderTop:"1px solid rgba(255,255,255,0.04)"}}><div style={{fontSize:14,color:"rgba(255,255,255,0.5)",lineHeight:1.7,maxHeight:300,overflowY:"auto",marginTop:12}} dangerouslySetInnerHTML={{__html:item.content.replace(/<img[^>]*>/g,'').slice(0,3000)}}/></div>}</div>})}</div>{wxResults.length<wxTotal&&<div style={{textAlign:"center",marginTop:14}}><Btn onClick={()=>wxSearch(wxPage+1)} disabled={wxLoading}>{wxLoading?<Loader2 size={14} className="spin"/>:"加载更多"}</Btn></div>}</>}
+          {wxResults.length===0&&!wxLoading&&<div style={{textAlign:"center",padding:"30px 0",color:"rgba(255,255,255,0.2)",fontSize:15}}>输入关键词搜索公众号文章</div>}
+        </Card>}
 
-          {/* 搜索结果 */}
-          {wxResults.length>0&&<>
-            <div style={{fontSize:14,color:"rgba(255,255,255,0.35)",marginBottom:12}}>找到 {wxTotal} 篇文章，已加载 {wxResults.length} 篇</div>
-            <div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:500,overflowY:"auto"}}>
-              {wxResults.map((item,idx)=>{
-                const isSaved=wxSaved.has(item.url)||knowledgeBase.some(k=>k.title===item.title);
-                const isExp=wxExpand===idx;
-                return<div key={idx} style={{background:"rgba(255,255,255,0.03)",borderRadius:14,border:"1px solid rgba(255,255,255,0.05)",overflow:"hidden"}}>
-                  <div style={{padding:"16px 20px",display:"flex",gap:14,alignItems:"flex-start"}}>
-                    {item.avatar&&<img src={item.avatar} style={{width:80,height:52,borderRadius:8,objectFit:"cover",flexShrink:0}} onError={e=>{e.target.style.display='none';}}/>}
-                    <div style={{flex:1,minWidth:0}}>
-                      <div style={{fontSize:16,fontWeight:600,lineHeight:1.4,marginBottom:6,overflow:"hidden",textOverflow:"ellipsis",display:"-webkit-box",WebkitLineClamp:2,WebkitBoxOrient:"vertical"}}>{item.title}</div>
-                      <div style={{display:"flex",flexWrap:"wrap",gap:10,fontSize:13,color:"rgba(255,255,255,0.35)"}}>
-                        <span style={{color:"rgba(255,255,255,0.5)",fontWeight:500}}>{item.wx_name}</span>
-                        <span>👁 {item.read>=10000?(item.read/10000).toFixed(1)+'w':item.read}</span>
-                        <span>👍 {item.praise}</span>
-                        <span>👀 {item.looking}</span>
-                        <span>{item.publish_time_str}</span>
-                        {item.is_original===1&&<span style={{color:"#34C759",fontWeight:600}}>原创</span>}
-                      </div>
-                    </div>
-                    <div style={{display:"flex",flexDirection:"column",gap:6,flexShrink:0}}>
-                      <Btn small primary onClick={()=>wxSaveToKb(item)} disabled={isSaved}>
-                        {isSaved?<><Check size={12}/>已收录</>:<><Plus size={12}/>收录</>}
-                      </Btn>
-                      <Btn small onClick={()=>setWxExpand(isExp?null:idx)}>
-                        {isExp?<><ChevronUp size={12}/>收起</>:<><Eye size={12}/>预览</>}
-                      </Btn>
-                      {item.url&&<a href={item.url} target="_blank" rel="noopener noreferrer" style={{display:"flex",alignItems:"center",justifyContent:"center",gap:4,padding:"7px 14px",borderRadius:8,fontSize:12,fontWeight:600,background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",textDecoration:"none"}}>原文<ExternalLink size={11}/></a>}
-                    </div>
-                  </div>
-                  {isExp&&item.content&&<div style={{padding:"0 20px 16px",borderTop:"1px solid rgba(255,255,255,0.04)"}}>
-                    <div style={{fontSize:14,color:"rgba(255,255,255,0.5)",lineHeight:1.7,maxHeight:300,overflowY:"auto",marginTop:12,whiteSpace:"pre-wrap"}} dangerouslySetInnerHTML={{__html:item.content.replace(/<img[^>]*>/g,'').slice(0,3000)}}/>
-                  </div>}
-                </div>;
-              })}
-            </div>
-            {wxResults.length<wxTotal&&<div style={{textAlign:"center",marginTop:14}}>
-              <Btn onClick={()=>wxSearch(wxPage+1)} disabled={wxLoading}>{wxLoading?<Loader2 size={14} className="spin"/>:"加载更多"}</Btn>
-            </div>}
-          </>}
-          {wxResults.length===0&&!wxLoading&&wxKw&&<div style={{textAlign:"center",padding:"30px 0",color:"rgba(255,255,255,0.25)",fontSize:15}}>点击搜索查找公众号文章</div>}
-        </Card>
+        {/* 公众号订阅 */}
+        {kbMode==="follow"&&<Card style={{border:"1px solid rgba(52,199,89,0.15)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:18}}><span style={{fontSize:24}}>📡</span><div><div style={{fontSize:18,fontWeight:700}}>公众号订阅采集</div><div style={{fontSize:14,color:"rgba(255,255,255,0.35)",marginTop:2}}>输入公众号名称，拉取历史文章，批量收录</div></div></div>
+          <div style={{display:"flex",gap:10,marginBottom:14}}>
+            <Input value={wxName} onChange={e=>setWxName(e.target.value)} onKeyDown={e=>e.key==="Enter"&&wxHistSearch(1)} placeholder="输入公众号名称，如：人民日报、运营研究社..." style={{flex:1,marginBottom:0}}/>
+            <Btn primary onClick={()=>wxHistSearch(1)} disabled={wxHLoading||!wxName.trim()} style={{flexShrink:0}}>{wxHLoading?<><Loader2 size={15} className="spin"/>查询中</>:<><Search size={15}/>查询</>}</Btn>
+          </div>
+          {wxMpInfo&&<div style={{display:"flex",alignItems:"center",gap:16,padding:"16px 20px",background:"rgba(52,199,89,0.06)",borderRadius:14,marginBottom:16,border:"1px solid rgba(52,199,89,0.1)"}}>{wxMpInfo.avatar&&<img src={wxMpInfo.avatar} style={{width:48,height:48,borderRadius:12}} onError={e=>{e.target.style.display='none';}}/>}<div style={{flex:1}}><div style={{fontSize:17,fontWeight:700,color:"#34C759"}}>{wxMpInfo.name}</div><div style={{fontSize:13,color:"rgba(255,255,255,0.35)",marginTop:3}}>ID: {wxMpInfo.wxid} · 总发文 {wxMpInfo.total} 次</div></div></div>}
+          {wxHist.length>0&&<><div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}><span style={{fontSize:14,color:"rgba(255,255,255,0.35)"}}>已加载 {wxHist.filter(i=>i.title).length} 篇</span><Btn small onClick={()=>{const unsaved=wxHist.filter(i=>!wxSaved.has(i.url)&&!knowledgeBase.some(k=>k.title===i.title)&&i.title);unsaved.forEach(i=>wxHistSaveToKb(i));}}><Plus size={12}/>全部收录 ({wxHist.filter(i=>!wxSaved.has(i.url)&&!knowledgeBase.some(k=>k.title===i.title)&&i.title).length})</Btn></div><div style={{display:"flex",flexDirection:"column",gap:8,maxHeight:500,overflowY:"auto"}}>{wxHist.filter(i=>i.title).map((item,idx)=>{const isSaved=wxSaved.has(item.url)||knowledgeBase.some(k=>k.title===item.title);const isDeleted=item.is_deleted==="1"||item.msg_status===7;return<div key={idx} style={{background:isDeleted?"rgba(255,59,48,0.03)":"rgba(255,255,255,0.03)",borderRadius:14,border:isDeleted?"1px solid rgba(255,59,48,0.1)":"1px solid rgba(255,255,255,0.05)",opacity:isDeleted?0.5:1,padding:"14px 18px",display:"flex",gap:12,alignItems:"flex-start"}}>{item.cover_url&&<img src={item.cover_url} style={{width:72,height:48,borderRadius:8,objectFit:"cover",flexShrink:0}} onError={e=>{e.target.style.display='none';}}/>}<div style={{flex:1,minWidth:0}}><div style={{fontSize:15,fontWeight:600,lineHeight:1.4,marginBottom:5}}>{item.title}</div><div style={{display:"flex",flexWrap:"wrap",gap:8,fontSize:12,color:"rgba(255,255,255,0.3)"}}><span>{item.post_time_str}</span><span>{item.position===0?"头条":`第${item.position+1}条`}</span><span>{item.types===9?"群发":"发布"}</span>{item.original===1&&<span style={{color:"#34C759"}}>原创</span>}{isDeleted&&<span style={{color:"#FF3B30"}}>已删除</span>}</div>{item.digest&&<div style={{fontSize:13,color:"rgba(255,255,255,0.25)",marginTop:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.digest}</div>}</div><div style={{display:"flex",flexDirection:"column",gap:5,flexShrink:0}}>{!isDeleted&&<Btn small primary onClick={()=>wxHistSaveToKb(item)} disabled={isSaved}>{isSaved?<><Check size={12}/>已收录</>:<><Plus size={12}/>收录</>}</Btn>}{item.url&&<a href={item.url} target="_blank" rel="noopener noreferrer" style={{display:"flex",alignItems:"center",justifyContent:"center",gap:4,padding:"7px 14px",borderRadius:8,fontSize:12,fontWeight:600,background:"rgba(255,255,255,0.04)",color:"rgba(255,255,255,0.4)",textDecoration:"none"}}>原文<ExternalLink size={11}/></a>}</div></div>})}</div>{wxHPage<wxHTotalPage&&<div style={{textAlign:"center",marginTop:14}}><Btn onClick={()=>wxHistSearch(wxHPage+1)} disabled={wxHLoading}>{wxHLoading?<Loader2 size={14} className="spin"/>:"加载更多"}</Btn></div>}</>}
+          {wxHist.length===0&&!wxHLoading&&<div style={{textAlign:"center",padding:"30px 0",color:"rgba(255,255,255,0.2)",fontSize:15}}>输入公众号名称查询历史文章</div>}
+        </Card>}
 
-        {/* 手动添加素材 */}
-        <Card>
-          <Label>{kbEdit?"编辑素材":"手动添加素材"}</Label>
+        {/* 手动添加 */}
+        {kbMode==="manual"&&<Card>
+          <Label>{kbEdit?"编辑素材":"添加素材"}</Label>
           <Input value={kbTitle} onChange={e=>setKbTitle(e.target.value)} placeholder="标题，如：某餐饮客户3个月涨粉2万案例"/>
-          <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>
-            {KB_CATS.map(c=><button key={c} onClick={()=>setKbCat(c)} style={{padding:"7px 16px",borderRadius:20,fontSize:14,border:"none",cursor:"pointer",background:kbCat===c?"#007AFF":"rgba(255,255,255,0.06)",color:kbCat===c?"#fff":"rgba(255,255,255,0.4)"}}>{c}</button>)}
-          </div>
+          <div style={{display:"flex",gap:8,marginBottom:14,flexWrap:"wrap"}}>{KB_CATS.map(c=><button key={c} onClick={()=>setKbCat(c)} style={{padding:"7px 16px",borderRadius:20,fontSize:14,border:"none",cursor:"pointer",background:kbCat===c?"#007AFF":"rgba(255,255,255,0.06)",color:kbCat===c?"#fff":"rgba(255,255,255,0.4)"}}>{c}</button>)}</div>
           <TextArea value={kbContent} onChange={e=>setKbContent(e.target.value)} placeholder="粘贴公司介绍、案例复盘、服务说明、行业数据等素材..." rows={5}/>
-          <div style={{display:"flex",gap:8,marginTop:14}}>
-            {kbEdit&&<Btn onClick={()=>{setKbEdit(null);setKbTitle("");setKbContent("");}}>取消</Btn>}
-            <Btn primary onClick={addKbItem} disabled={!kbTitle.trim()||!kbContent.trim()}><Plus size={15}/>{kbEdit?"保存修改":"添加到知识库"}</Btn>
-          </div>
-        </Card>
+          <div style={{display:"flex",gap:8,marginTop:14}}>{kbEdit&&<Btn onClick={()=>{setKbEdit(null);setKbTitle("");setKbContent("");}}>取消</Btn>}<Btn primary onClick={addKbItem} disabled={!kbTitle.trim()||!kbContent.trim()}><Plus size={15}/>{kbEdit?"保存修改":"添加到知识库"}</Btn></div>
+        </Card>}
 
         {/* 素材列表 */}
-        {knowledgeBase.length>0&&<>
-          <div style={{display:"flex",gap:6,marginBottom:18,flexWrap:"wrap"}}>
-            <button onClick={()=>setKbFilter("all")} style={{padding:"6px 14px",borderRadius:16,fontSize:14,border:"none",cursor:"pointer",background:kbFilter==="all"?"#007AFF":"rgba(255,255,255,0.06)",color:kbFilter==="all"?"#fff":"rgba(255,255,255,0.4)"}}>全部 ({knowledgeBase.length})</button>
-            {KB_CATS.map(c=>{const cnt=knowledgeBase.filter(k=>k.category===c).length;return cnt>0?<button key={c} onClick={()=>setKbFilter(c)} style={{padding:"6px 14px",borderRadius:16,fontSize:14,border:"none",cursor:"pointer",background:kbFilter===c?"#007AFF":"rgba(255,255,255,0.06)",color:kbFilter===c?"#fff":"rgba(255,255,255,0.4)"}}>{c} ({cnt})</button>:null;})}
-          </div>
-          <div style={{display:"flex",flexDirection:"column",gap:8}}>
-            {filteredKb.map(k=><div key={k.id} style={{background:"rgba(255,255,255,0.03)",borderRadius:14,padding:"18px 22px",border:"1px solid rgba(255,255,255,0.04)"}}>
-              <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
-                <span style={{fontSize:13,padding:"3px 10px",borderRadius:8,background:k.category==="公众号素材"?"rgba(52,199,89,0.1)":"rgba(0,122,255,0.1)",color:k.category==="公众号素材"?"#34C759":"#007AFF",fontWeight:600}}>{k.category}</span>
-                <span style={{fontSize:16,fontWeight:600,flex:1}}>{k.title}</span>
-                {k.source&&<span style={{fontSize:12,color:"rgba(255,255,255,0.25)"}}>来源：{k.source}</span>}
-                <Btn small onClick={()=>editKbItem(k)}><PenTool size={12}/></Btn>
-                <Btn small danger onClick={()=>delKbItem(k.id)}><Trash2 size={12}/></Btn>
-              </div>
-              <div style={{fontSize:14,color:"rgba(255,255,255,0.5)",lineHeight:1.6,maxHeight:80,overflow:"hidden"}}>{k.content}</div>
-              <div style={{fontSize:12,color:"rgba(255,255,255,0.2)",marginTop:8}}>
-                {new Date(k.createdAt).toLocaleDateString("zh-CN")} · {k.content.length}字
-                {k.read!==undefined&&<span> · 👁{k.read} 👍{k.praise}</span>}
-              </div>
-            </div>)}
-          </div>
-        </>}
-        {!knowledgeBase.length&&<div style={{textAlign:"center",padding:"40px 0",color:"rgba(255,255,255,0.3)"}}><Database size={32} style={{marginBottom:10,opacity:0.3}}/><div style={{fontSize:16}}>知识库为空，搜索公众号文章或手动添加素材</div></div>}
+        {knowledgeBase.length>0&&<><div style={{fontSize:18,fontWeight:600,marginBottom:14,marginTop:8}}>📚 已收录素材 ({knowledgeBase.length})</div><div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}><button onClick={()=>setKbFilter("all")} style={{padding:"6px 14px",borderRadius:16,fontSize:14,border:"none",cursor:"pointer",background:kbFilter==="all"?"#007AFF":"rgba(255,255,255,0.06)",color:kbFilter==="all"?"#fff":"rgba(255,255,255,0.4)"}}>全部 ({knowledgeBase.length})</button>{KB_CATS.map(c=>{const cnt=knowledgeBase.filter(k=>k.category===c).length;return cnt>0?<button key={c} onClick={()=>setKbFilter(c)} style={{padding:"6px 14px",borderRadius:16,fontSize:14,border:"none",cursor:"pointer",background:kbFilter===c?"#007AFF":"rgba(255,255,255,0.06)",color:kbFilter===c?"#fff":"rgba(255,255,255,0.4)"}}>{c} ({cnt})</button>:null;})}</div><div style={{display:"flex",flexDirection:"column",gap:8}}>{filteredKb.map(k=><div key={k.id} style={{background:"rgba(255,255,255,0.03)",borderRadius:14,padding:"18px 22px",border:"1px solid rgba(255,255,255,0.04)"}}><div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}><span style={{fontSize:13,padding:"3px 10px",borderRadius:8,background:k.category==="公众号素材"?"rgba(52,199,89,0.1)":"rgba(0,122,255,0.1)",color:k.category==="公众号素材"?"#34C759":"#007AFF",fontWeight:600}}>{k.category}</span><span style={{fontSize:16,fontWeight:600,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{k.title}</span>{k.source&&<span style={{fontSize:12,color:"rgba(255,255,255,0.25)",flexShrink:0}}>来源：{k.source}</span>}<Btn small onClick={()=>{setKbMode("manual");editKbItem(k);}}><PenTool size={12}/></Btn><Btn small danger onClick={()=>delKbItem(k.id)}><Trash2 size={12}/></Btn></div><div style={{fontSize:14,color:"rgba(255,255,255,0.5)",lineHeight:1.6,maxHeight:60,overflow:"hidden"}}>{k.content}</div><div style={{fontSize:12,color:"rgba(255,255,255,0.2)",marginTop:6}}>{new Date(k.createdAt).toLocaleDateString("zh-CN")} · {k.content.length}字{k.read!==undefined&&<span> · 👁{k.read} 👍{k.praise}</span>}</div></div>)}</div></>}
+        {!knowledgeBase.length&&<div style={{textAlign:"center",padding:"40px 0",color:"rgba(255,255,255,0.3)"}}><Database size={32} style={{marginBottom:10,opacity:0.3}}/><div style={{fontSize:16}}>知识库为空，采集公众号文章或手动添加素材</div></div>}
       </div>}
 
       {/* CONTENT */}
