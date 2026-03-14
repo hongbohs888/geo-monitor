@@ -269,7 +269,7 @@ JSON：[{"stage":"TOFU-痛点驱动","question":"..."}]`;
 
   const logout=async()=>{await supabase.auth.signOut();};
 
-  const tabs=[{id:"home",label:"首页",icon:Home},{id:"keywords",label:"关键词",icon:Search},{id:"monitor",label:"采集",icon:Radar,badge:mon.length},{id:"kb",label:"知识库",icon:Database,badge:kb.length},{id:"content",label:"内容",icon:PenTool},{id:"queue",label:"待发布",icon:ClipboardList,badge:queueCount},{id:"publish",label:"发布",icon:Send},{id:"dashboard",label:"看板",icon:BarChart3}];
+  const tabs=[{id:"home",label:"首页",icon:HomeIcon},{id:"keywords",label:"关键词",icon:Search},{id:"monitor",label:"采集",icon:Radar,badge:mon.length},{id:"kb",label:"知识库",icon:Database,badge:kb.length},{id:"content",label:"内容",icon:PenTool},{id:"queue",label:"待发布",icon:ClipboardList,badge:queueCount},{id:"publish",label:"发布",icon:Send},{id:"dashboard",label:"看板",icon:BarChart3}];
 
   if(loading)return<div style={{height:"100vh",background:"#F0F4F8",display:"flex",alignItems:"center",justifyContent:"center"}}><Loader2 size={32} className="spin" color="#007AFF"/></div>;
 
