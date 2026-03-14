@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from "react";
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell } from "recharts";
-import { Search, Radar, LayoutDashboard, Plus, Zap, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertCircle, Star, Eye, EyeOff, Quote, ArrowRight, X, Settings, RefreshCw, Trash2, ExternalLink, Target, BarChart3, Sparkles, FileText, Copy, Check, BookOpen, Send, PenTool, Wifi, WifiOff, Lock, KeyRound, User, Phone, MessageCircle, MapPin, QrCode, Image, Archive, Clock, ChevronRight, Database, RotateCw, ClipboardList, LogOut, Home, Lightbulb } from "lucide-react";
+import { Search, Radar, LayoutDashboard, Plus, Zap, ChevronDown, ChevronUp, Loader2, CheckCircle2, AlertCircle, Star, Eye, EyeOff, Quote, ArrowRight, X, Settings, RefreshCw, Trash2, ExternalLink, Target, BarChart3, Sparkles, FileText, Copy, Check, BookOpen, Send, PenTool, Wifi, WifiOff, Lock, KeyRound, User, Phone, MessageCircle, MapPin, QrCode, Image, Archive, Clock, ChevronRight, Database, RotateCw, ClipboardList, LogOut, Home as HomeIcon, Lightbulb } from "lucide-react";
 import { supabase } from "../lib/supabase";
 
 // ======== CONFIG ========
