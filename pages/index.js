@@ -240,7 +240,7 @@ JSON：[{"stage":"TOFU-痛点驱动","question":"..."}]`;
 
   // WX Search
   const wxSearch=useCallback(async(page=1)=>{if(!wxKw.trim())return;setWxLoading(true);if(page===1)setWxResults([]);
-    try{const r=await fetch('/api/wxsearch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kw:wxKw.trim(),page,period:wxPeriod})});const d=await r.json();if(d.code===200&&d.data){if(page===1)setWxResults(d.data);else setWxResults(p=>[...p,...d.data]);setWxTotal(d.total||0);setWxPage(page);}}catch(e){}setWxLoading(false);},[wxKw,wxPeriod]);
+    try{const r=await fetch('/api/wxsearch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kw:wxKw.trim(),page,period:wxPeriod})});const d=await r.json();if(d.code===0&&d.data){if(page===1)setWxResults(d.data);else setWxResults(p=>[...p,...d.data]);setWxTotal(d.total||0);setWxPage(page);}}catch(e){}setWxLoading(false);},[wxKw,wxPeriod]);
 
   const wxSaveToKb=useCallback(async item=>{
     if(!project)return;const content=item.content?item.content.replace(/<[^>]+>/g,'').slice(0,5000):item.title;
@@ -250,7 +250,7 @@ JSON：[{"stage":"TOFU-痛点驱动","question":"..."}]`;
 
   // WX History
   const wxHistSearch=useCallback(async(page=1)=>{if(!wxName.trim())return;setWxHLoading(true);if(page===1){setWxHist([]);setWxMpInfo(null);}
-    try{const r=await fetch('/api/wxhistory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:wxName.trim(),page})});const d=await r.json();if(d.code===200&&d.data){if(page===1)setWxHist(d.data);else setWxHist(p=>[...p,...d.data]);setWxHTotalPage(d.total_page||0);setWxHPage(page);if(d.mp_nickname)setWxMpInfo({name:d.mp_nickname,avatar:d.head_img,total:d.total_num});}}catch(e){}setWxHLoading(false);},[wxName]);
+    try{const r=await fetch('/api/wxhistory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:wxName.trim(),page})});const d=await r.json();if(d.code===0&&d.data){if(page===1)setWxHist(d.data);else setWxHist(p=>[...p,...d.data]);setWxHTotalPage(d.total_page||0);setWxHPage(page);if(d.mp_nickname)setWxMpInfo({name:d.mp_nickname,avatar:d.head_img,total:d.total_num});}}catch(e){}setWxHLoading(false);},[wxName]);
 
   const wxHistSave=useCallback(async item=>{
     if(!project)return;
